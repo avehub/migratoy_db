@@ -397,7 +397,7 @@ class UserMigrator(BaseMigrator):
         for data in transformed_data:
             try:
                 # 插入用户基础信息
-                # user_id = self.new_db.execute_insert(user_sql, data['user'])
+                user_id = self.new_db.execute_insert(user_sql, data['user'])
 
                 # 插入VIP信息（如果存在）
                 if data['vip']:
@@ -808,56 +808,4 @@ class MigrationOrchestrator:
 
         return report
 
-
-def main():
-    """主函数示例"""
-    # 数据库配置
-    old_db_config = DatabaseConfig(
-        host='127.0.0.1',
-        port=3306,
-        username='root',
-        password='1234',
-        database='old',
-        # ssh_host='47.98.42.167',  # SSH服务器地址
-        # ssh_port=22,  # SSH端口，默认22
-        # ssh_username='www',  # SSH用户名
-        # ssh_password='Lucky86400.',  # SSH用户名
-        # ssh_private_key_path='./alichild.pem',  # SSH私钥路径
-    )
-
-    new_db_config = DatabaseConfig(
-        host='127.0.0.1',
-        port=3306,
-        username='root',
-        password='1234',
-        database='game_server'
-    )
-
-    # 创建迁移编排器
-    orchestrator = MigrationOrchestrator(old_db_config, new_db_config)
-
-    # 添加迁移器（按依赖顺序）
-    # 1. 先迁移用户数据
-    orchestrator.add_migrator(UserMigrator)
-    # 2. 再迁移俱乐部数据
-    # orchestrator.add_migrator(ClubMigrator)
-    # 2.1. 迁移俱乐部成员数据
-    # orchestrator.add_migrator(ClubUserMigrator)
-    # 3. 迁移游戏战绩数据
-    # orchestrator.add_migrator(GameRecordMigrator)
-
-    # 执行迁移
-    result = orchestrator.run_migration()
-
-    # 生成报告
-    report = orchestrator.generate_report()
-    print(report)
-
-    # 保存报告到文件
-    with open(f'migration_report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt', 'w') as f:
-        f.write(report)
-
-
-if __name__ == "__main__":
-    main()
 
