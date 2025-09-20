@@ -294,7 +294,7 @@ class UserMigrator(BaseMigrator):
             phone, vip_level_point, vip_level,lottery_times, shen_fen_zheng_no, real_name, platform, diamond2, dai_li_zhe_kou
         FROM players LEFT JOIN player_diamond2 ON players.uid = player_diamond2.uid
         WHERE players.uid >= 1000000 
-	    AND players.real_name <> ""
+	    AND (platform = 7 or players.real_name <> "" )
         """
         return self.old_db.execute_query(sql)
 
