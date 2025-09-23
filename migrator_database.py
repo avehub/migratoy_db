@@ -167,6 +167,8 @@ class BaseMigrator(ABC):
         self.name = self.__class__.__name__
         self.result = MigrationResult()
         self.batch_size = 1000  # 默认批次大小
+        self.record_rid = 0
+        self.record_tid = 0
 
     @abstractmethod
     def extract_data(self) -> List[Dict]:
@@ -245,10 +247,12 @@ class BaseMigrator(ABC):
         return self.result
 
     # 批量迁移数据
-    def migrate_in_batches(self, batch_size=5000):
+    def migrate_in_batches(self, batch_size=5000, record_rid: int=0, record_tid: int=0):
         """批量迁移数据"""
-        self.batch_size = batch_size
         offset = 0
+        self.batch_size = batch_size
+        self.record_rid = record_rid
+        self.record_tid = record_tid
 
         try:
             while True:
@@ -260,7 +264,7 @@ class BaseMigrator(ABC):
                 logger.info(f"Processing batch: offset={offset}, size={len(batch)}")
 
                 # 转换数据
-                transformed = self.transform_data(batch)
+                transformed = self.transform_data(batch, self.record_rid, self.record_tid)
 
                 # 验证数据
                 if not self.validate_data(transformed):
@@ -553,24 +557,26 @@ class GameRecordMigrator(BaseMigrator):
             map_status[player['uid']] = status
         return map_status
     
-    def transform_data(self, old_data: List[Dict]) -> List[Dict]:
+    def transform_data(self, old_data: List[Dict], record_rid: int = 0, record_tid: int = 0) -> List[Dict]:
         """转换战绩数据结构"""
         transformed = []
         records_game_room = []
         records_game_total = []
         records_game_segment = []
-        record_rid = 1
-        record_tid = 1
+        self.record_rid += 1
+        self.record_tid += 1
         for row in old_data:
             cs_type = self.__cs_type(row['game_type'])
             play_type = self.__play_type(row['rule_type'])
             player_list = orjson.loads(row['player_list'])
+            if not player_list:
+                continue
             max_player = len(player_list)
             price = row['de_count'] - row['re_count']
             pay_type = self.__pay_type(row['is_club_jijin'])
             # 房间战绩
             records_game_room.append({
-                'record_rid': record_rid,
+                'record_rid': self.record_rid,
                 'cs_type': cs_type,
                 'play_type': play_type,
                 'created': row['creat_time'],
@@ -596,8 +602,8 @@ class GameRecordMigrator(BaseMigrator):
             for player in player_list:
                 records_game_total.append({
                     'created': row['creat_time'],
-                    'record_rid': record_rid,
-                    'record_tid': record_tid,
+                    'record_rid': self.record_rid,
+                    'record_tid': self.record_tid,
                     'uid': player['uid'],
                     'club_id': row['club_id'],
                     'room_id': row['room_id'],
@@ -617,8 +623,8 @@ class GameRecordMigrator(BaseMigrator):
                 for round_num in total_round:
                     records_game_segment.append({
                         'created': row['creat_time'],
-                        'record_rid': record_rid,
-                        'record_tid': record_tid,
+                        'record_rid': self.record_rid,
+                        'record_tid': self.record_tid,
                         'uid': player['uid'],
                         'round_num': round_num,
                         'round_status': 0,
@@ -628,8 +634,8 @@ class GameRecordMigrator(BaseMigrator):
                         'cs_type': cs_type,
                     })
 
-                record_tid += 1
-            record_rid += 1
+                self.record_tid += 1
+            self.record_rid += 1
         transformed = [
             {
                 'records_game_room': records_game_room,
