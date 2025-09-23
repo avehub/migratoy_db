@@ -1,6 +1,6 @@
 from datetime import datetime
 from time import sleep
-from migrator_database import ClubMigrator, ClubUserMigrator, DatabaseConfig, MigrationOrchestrator, UserMigrator
+from migrator_database import ClubMigrator, ClubUserMigrator, DatabaseConfig, MigrationOrchestrator, UserMigrator, GameRecordMigrator
 from conf import OLD_CONF, NEW_CONF
 
 def main():
@@ -27,13 +27,13 @@ def main():
 
     # 添加迁移器（按依赖顺序分步完成）
     # 1. 先迁移用户数据
-    orchestrator.add_migrator(UserMigrator)
+    # orchestrator.add_migrator(UserMigrator)
     # 2. 再迁移俱乐部数据
     #orchestrator.add_migrator(ClubMigrator)
     # 21. 迁移俱部成员数据
     #orchestrator.add_migrator(ClubUserMigrator)
     # 3. 迁移游戏战绩数据
-    # orchestrator.add_migrator(GameRecordMigrator)
+    orchestrator.add_migrator(GameRecordMigrator)
 
     # 执行迁移
     result = orchestrator.run_migration()

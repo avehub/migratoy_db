@@ -13,6 +13,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple, Callable
+import orjson
 import pymysql
 from sshtunnel import SSHTunnelForwarder
 
@@ -416,7 +417,9 @@ class UserMigrator(BaseMigrator):
 class GameRecordMigrator(BaseMigrator):
     """游戏战绩迁移器示例"""
     # 只获取最近7天内的数据
-    end_time = int(time.time())
+    now = datetime.now()
+    start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_time = int(start_of_day.timestamp())
     start_time = end_time - 7 * 24 * 60 * 60
 
 
@@ -424,147 +427,274 @@ class GameRecordMigrator(BaseMigrator):
         """提取房间战绩和详情数据"""
         sql = """
         SELECT 
-            record_id,
-            game_type,
-            room_id,
-            game_type,
-            end_time,
-            play_setting,
-            player_list,
+            room_records.game_type,
+            room_records.room_id,
+            room_records.club_id,
             rule_type,
-            round_index
-        FROM game_record 
-        WHERE r.end_time >= %s
+            round_index,
+            creator,
+            creat_time,
+            end_time,
+            de_count,
+            re_count,
+            player_list,
+            finish_sta,
+            total_round,
+            round_index,
+            record_id,
+            rule_details,
+            is_club_jijin
+        FROM room_records JOIN room_card_logs ON room_records.room_id = room_card_logs.tid
+        WHERE end_time >= %s AND end_time < %s LIMIT 100
         """
-        return self.old_db.execute_query(sql, (self.start_time,))
+        return self.old_db.execute_query(sql, (self.start_time, self.end_time))
 
     def extract_batch(self, offset, limit):
         """提取一批数据"""
         sql = """
         SELECT 
-            record_id,
-            game_type,
-            room_id,
-            game_type,
-            end_time,
-            play_setting,
-            player_list,
+            room_records.game_type,
+            room_records.room_id,
+            room_records.club_id,
             rule_type,
-            round_index
-        FROM game_record 
-        WHERE r.end_time >= %s
+            round_index,
+            creator,
+            creat_time,
+            end_time,
+            de_count,
+            re_count,
+            player_list,
+            finish_sta,
+            total_round,
+            round_index,
+            record_id,
+            rule_details,
+            is_club_jijin
+        FROM room_records JOIN room_card_logs ON room_records.room_id = room_card_logs.tid
+        WHERE end_time >= %s AND end_time < %s
             LIMIT %s OFFSET %s
         """
-        return self.old_db.execute_query(sql, (limit, offset))
+        return self.old_db.execute_query(sql, (self.start_time, self.end_time, limit, offset))
+    
+    def __cs_type(self, game_type):
+        if game_type == 9:
+            return 22
+        elif game_type == 56:
+            return 25
+        elif game_type == 39:
+            return 23
+        elif game_type == 49:
+            return 24
+        else:
+            return game_type
+    
+    def __play_type(self, rule_type):
+        if rule_type == 2:
+            return 2
+        elif rule_type == 3:
+            return 1
+        elif rule_type == 4:
+            return 7
+        elif rule_type == 5:
+            return 3
+        elif rule_type == 6:
+            return 4
+        elif rule_type == 7:
+            return 5
+        elif rule_type == 9:
+            return 6
+        else:
+            return rule_type
+    
+    def __pay_type(self, is_club_jijin):
+        if is_club_jijin == 1:
+            return 2
+        else:
+            return 0
+        
+    def __room_status(self, finish_sta):
+        if finish_sta == 1:
+            return 0
+        else:
+            return 1
+        
 
+    def __price(self, creator, uid, price, pay_type):
+        if pay_type == 2:
+            return 0
+        else:
+            if creator == uid:
+                return price
+            else:
+                return 0
+            
+    def __final_ranking(self, player_list):
+        """计算最终排名"""
+        sorted_players = sorted(player_list, key=lambda x: x['score'], reverse=True)
+        rankings = {player['uid']: rank + 1 for rank, player in enumerate(sorted_players)}
+        return rankings
+    
+    def __final_grade(self, player_list):
+        """计算全场最佳"""
+        final_grade = {}
+        sorted_players = sorted(player_list, key=lambda x: x['score'], reverse=True)
+        max_score = sorted_players[0]
+        for player in sorted_players:
+            final_grade[player['uid']] = 1 if player['uid'] == max_score['uid'] else 0
+        return final_grade
+
+    def __final_status(self, player_list):
+        """计算最终状态"""
+        map_status = {}
+        for player in player_list:
+            status = 0
+            if player['score'] > 0:
+                status = 1
+            map_status[player['uid']] = status
+        return map_status
+    
     def transform_data(self, old_data: List[Dict]) -> List[Dict]:
         """转换战绩数据结构"""
-        # 按record_id分组
-        grouped_records = {}
-
+        transformed = []
+        records_game_room = []
+        records_game_total = []
+        records_game_segment = []
+        record_rid = 1
+        record_tid = 1
         for row in old_data:
-            record_id = row['record_id']
+            cs_type = self.__cs_type(row['game_type'])
+            play_type = self.__play_type(row['rule_type'])
+            player_list = orjson.loads(row['player_list'])
+            max_player = len(player_list)
+            price = row['de_count'] - row['re_count']
+            pay_type = self.__pay_type(row['is_club_jijin'])
+            # 房间战绩
+            records_game_room.append({
+                'record_rid': record_rid,
+                'cs_type': cs_type,
+                'play_type': play_type,
+                'created': row['creat_time'],
+                'start_time': row['creat_time'],
+                'updated': row['end_time'],
+                'end_time': row['end_time'],
+                'room_id': row['room_id'],
+                'club_id': row['club_id'],
+                'creator': row['creator'],
+                'total_round': row['total_round'],
+                'round_num': row['round_index'],
+                'max_player': max_player,
+                'pay_type': pay_type,
+                'price': price,
+                'room_status': self.__room_status(row['finish_sta']),
+                'rule_details': row['rule_details'],
+            })
 
-            if record_id not in grouped_records:
-                grouped_records[record_id] = {
-                    'room_record': {
-                        'old_record_id': record_id,
-                        'room_id': row['room_id'],
-                        'room_name': row['room_name'],
-                        'game_type': row['game_type'],
-                        'total_rounds': row['total_rounds'],
-                        'created_time': row['created_time'],
-                        'finished_time': row['finished_time']
-                    },
-                    'total_records': {},  # 用户总战绩
-                    'round_records': []  # 子局战绩
-                }
-
-            # 处理详情数据
-            if row['detail_id']:
-                user_id = row['user_id']
-
-                # 累计总战绩
-                if user_id not in grouped_records[record_id]['total_records']:
-                    grouped_records[record_id]['total_records'][user_id] = {
-                        'user_id': user_id,
-                        'username': row['username'],
-                        'total_score': 0,
-                        'final_score': row['final_score']
-                    }
-
-                grouped_records[record_id]['total_records'][user_id]['total_score'] += row['score']
+            # 总局战绩
+            final_ranking = self.__final_ranking(player_list)
+            final_status = self.__final_status(player_list)
+            final_grade = self.__final_grade(player_list)
+            for player in player_list:
+                records_game_total.append({
+                    'created': row['creat_time'],
+                    'record_rid': record_rid,
+                    'record_tid': record_tid,
+                    'uid': player['uid'],
+                    'club_id': row['club_id'],
+                    'room_id': row['room_id'],
+                    'play_type': play_type,
+                    'price': self.__price(row['creator'], player['uid'], price, pay_type),
+                    'final_status': final_status.get(player['uid']),
+                    'final_score': player['score'],
+                    'final_ranking': final_ranking[player['uid']],
+                    'final_grade': final_grade.get(player['uid']),
+                    'cs_type': cs_type,
+                    
+                })
+                
 
                 # 子局战绩
-                grouped_records[record_id]['round_records'].append({
-                    'user_id': user_id,
-                    'username': row['username'],
-                    'round_num': row['round_num'],
-                    'score': row['score']
-                })
+                total_round = range(1, row['total_round'] + 1)
+                for round_num in total_round:
+                    records_game_segment.append({
+                        'created': row['creat_time'],
+                        'record_rid': record_rid,
+                        'record_tid': record_tid,
+                        'uid': player['uid'],
+                        'round_num': round_num,
+                        'round_status': 0,
+                        'round_score': 0,
+                        'round_ranking': 0,
+                        'replay_msg': row["record_id"],
+                        'cs_type': cs_type,
+                    })
 
-        return list(grouped_records.values())
+                record_tid += 1
+            record_rid += 1
+        transformed = [
+            {
+                'records_game_room': records_game_room,
+                'records_game_total': records_game_total,
+                'records_game_segment': records_game_segment,
+            }
+        ]    
+
+        return transformed
 
     def load_data(self, transformed_data: List[Dict]) -> None:
         """加载战绩数据"""
         room_sql = """
-        INSERT INTO room_records (
-            old_record_id, room_id, room_name, game_type, total_rounds,
-            created_time, finished_time
+        INSERT INTO records_game_room (
+            record_rid, cs_type, play_type, created, start_time, updated, end_time, room_id, club_id, creator, total_round, round_num, max_player, pay_type, price, room_status, rule_details
         ) VALUES (
-            %(old_record_id)s, %(room_id)s, %(room_name)s, %(game_type)s,
-            %(total_rounds)s, %(created_time)s, %(finished_time)s
+            %(record_rid)s, %(cs_type)s, %(play_type)s, %(created)s, %(start_time)s, %(updated)s, %(end_time)s, %(room_id)s, %(club_id)s, %(creator)s, %(total_round)s, %(round_num)s, %(max_player)s, %(pay_type)s, %(price)s, %(room_status)s, %(rule_details)s
         )
         """
 
         total_sql = """
-        INSERT INTO total_records (
-            record_id, user_id, username, total_score, final_score
+        INSERT INTO records_game_total (
+            created, record_rid, record_tid, uid, club_id, room_id, play_type, price, final_status, final_score, final_ranking, final_grade, cs_type
         ) VALUES (
-            %(record_id)s, %(user_id)s, %(username)s, %(total_score)s, %(final_score)s
+            %(created)s, %(record_rid)s, %(record_tid)s, %(uid)s, %(club_id)s, %(room_id)s, %(play_type)s, %(price)s, %(final_status)s, %(final_score)s, %(final_ranking)s, %(final_grade)s, %(cs_type)s
         )
         """
-
+                        
         round_sql = """
-        INSERT INTO round_records (
-            record_id, user_id, username, round_num, score
+        INSERT INTO records_game_segment (
+            created, record_rid, record_tid, uid, round_num, round_status, round_score, round_ranking, replay_msg, cs_type
         ) VALUES (
-            %(record_id)s, %(user_id)s, %(username)s, %(round_num)s, %(score)s
+            %(created)s, %(record_rid)s, %(record_tid)s, %(uid)s, %(round_num)s, %(round_status)s, %(round_score)s, %(round_ranking)s, %(replay_msg)s, %(cs_type)s
         )
         """
+        records_game_room = transformed_data[0]['records_game_room']
+        records_game_total = transformed_data[0]['records_game_total']        
+        records_game_segment = transformed_data[0]['records_game_segment']
+        try:
+            # 批量插入房间战绩
+            self.new_db.execute_batch_insert(room_sql, records_game_room)
+        except Exception as e:
+            self.result.error_count += 1
+            error_msg = f"Failed to migrate record records_game_room: {str(e)}"
+            self.result.errors.append(error_msg)
+            logger.error(error_msg)
 
-        for record_data in transformed_data:
-            try:
-                # 插入房间战绩
-                new_record_id = self.new_db.execute_insert(room_sql, record_data['room_record'])
+        try:
+            # 批量插入总战绩
+            self.new_db.execute_batch_insert(total_sql, records_game_total)
+        except Exception as e:
+            self.result.error_count += 1
+            error_msg = f"Failed to migrate record records_game_total: {str(e)}"
+            self.result.errors.append(error_msg)
+            logger.error(error_msg)
 
-                # 批量插入总战绩
-                total_params = []
-                for total_record in record_data['total_records'].values():
-                    params = total_record.copy()
-                    params['record_id'] = new_record_id
-                    total_params.append(params)
+        try:
+            # 批量插入子局战绩
+            self.new_db.execute_batch_insert(round_sql, records_game_segment)
+        except Exception as e:
+            self.result.error_count += 1
+            error_msg = f"Failed to migrate record records_game_segment: {str(e)}"
+            self.result.errors.append(error_msg)
+            logger.error(error_msg)
 
-                if total_params:
-                    self.new_db.execute_batch_insert(total_sql, [tuple(p.values()) for p in total_params])
-
-                # 批量插入子局战绩
-                round_params = []
-                for round_record in record_data['round_records']:
-                    params = round_record.copy()
-                    params['record_id'] = new_record_id
-                    round_params.append(params)
-
-                if round_params:
-                    self.new_db.execute_batch_insert(round_sql, [tuple(p.values()) for p in round_params])
-
-                self.result.success_count += 1
-
-            except Exception as e:
-                self.result.error_count += 1
-                error_msg = f"Failed to migrate record {record_data['room_record']['old_record_id']}: {str(e)}"
-                self.result.errors.append(error_msg)
-                logger.error(error_msg)
 
 class ClubMigrator(BaseMigrator):
     """俱乐部迁移器"""
@@ -761,6 +891,7 @@ class MigrationOrchestrator:
                 logger.info(f"Running migrator: {migrator.name}")
 
                 try:
+                    # 数据迁移分页切换
                     # result = migrator.migrate()
                     result = migrator.migrate_in_batches(self.batch_size)
                     self.overall_result.success_count += result.success_count
