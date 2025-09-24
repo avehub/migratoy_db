@@ -5,6 +5,7 @@ __pycache__/
 *.db
 *.sqlite
 *.log
-./conf.py
+*.conf.py
+
 
 
