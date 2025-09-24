@@ -1,8 +1,53 @@
 # migrator_db
-批量迁移欢聚麻将2.0老用户数据，主要包含模块：用户模块、茶馆模块
+通过python实现的批量mysql老数据迁移脚本，因为工期比较赶，做了的也比较简单，支持多表、分页导入
+
+# 使用
+```
+# 拉取项目
+git clone git@github.com:avehub/migratoy_db.git
+# 新建配置文件
+touch conf.py
+# 配置文件conf.py内容
+ENV = 'dev'  # dev | prod
+class OLD_CONF:
+    """ 旧数据库配置 """
+    if ENV == 'prod':
+        HOST = '127.0.0.1'
+        PORT = 3306
+        USERNAME = 'user'
+        PASSWORD = 'passwd'
+        DATABASE = 'new_db'
+    else:
+        HOST = '127.0.0.1'
+        PORT = 3306
+        USERNAME = 'root'
+        PASSWORD = 'passwd'
+        DATABASE = 'old_db'
+
+class NEW_CONF:
+    """ 新数据库配置 """
+    if ENV == 'prod':
+        HOST = '127.0.0.1'
+        PORT = 3306
+        USERNAME = 'user'
+        PASSWORD = 'passwd'
+        DATABASE = 'new_db'
+    else:
+        HOST = '127.0.0.1'
+        PORT = 3306
+        USERNAME = 'root'
+        PASSWORD = 'passwd'
+        DATABASE = 'old_db'
+
+
+```
+
 
 ## 数据迁移
+目前项目内迁移数据模块：用户模块、茶馆(俱乐部)模块、用户战绩
+如果需要迁移不同表请进行编辑修改即可
 
+## 以下内容为迁移的数据及关联表介绍（可不用关注）
 
 ### 用户模块
 - 基础信息、用户资源（金币、钻石、黄钻）、用户VIP
@@ -55,6 +100,30 @@ rule 字段含义：3-普通成员 2-管理员  1-创建者，4-小黑屋
 ```
 茶馆表： clubs
 茶馆用户关系表： club_users
+
+
+```
+
+### 战绩模块
+- 战绩基础信息、房间号、玩家
+
+#### 战绩旧表信息
+```
+战绩表： club
+战绩用户关系表： club_members
+
+战绩状态club_status 字段解析：
+默认为1，取值范围1正常，3关闭
+
+战绩及用户关系：
+rule 字段含义：3-普通成员 2-管理员  1-创建者，4-小黑屋
+
+```
+
+#### 关联新表
+```
+战绩表： clubs
+战绩用户关系表： club_users
 
 
 ```
